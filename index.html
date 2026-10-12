@@ -97,6 +97,8 @@ textarea{min-height:76px;resize:vertical}
 .scard small{color:var(--muted);font-size:13px}
 .scard.prog{border:2px solid var(--olive);padding:11px}
 .scard.done{background:var(--olive-soft);border-color:var(--olive)}
+.scard.new{border:1.5px dashed var(--olive);background:var(--bg);color:var(--olive-dark);justify-content:center}
+.scard.new strong{font-size:18px}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;border-radius:99px;padding:3px 10px;width:fit-content;white-space:nowrap}
 .pill.exc{background:var(--exc-bg);color:var(--exc)}
 .pill.ok{background:var(--ok-bg);color:var(--ok)}
@@ -220,18 +222,15 @@ body.typing #app{padding-bottom:8px!important}
 <script>
 /* =========================================================
    LUGARES DEL LEVANTAMIENTO
-   Son DE EJEMPLO: se reemplazan con la lista real.
-   "cod" es un código corto (2-4 letras) que forma el ID del activo: ME-PL-001
+   No hay lugares predefinidos: se escriben en el formulario y se guardan
+   en el celular (S.listaLugares). "cod" son las iniciales que forman el ID
+   del activo: Playa Langosta → ME-PL-001
    ========================================================= */
-const LUGARES = [
-  {id:"langosta",  nombre:"Playa Langosta",  cod:"PL"},
-  {id:"rodera",    nombre:"Rodera",          cod:"RD"},
-  {id:"bonita",    nombre:"Playa Bonita",    cod:"PB"},
-  {id:"avellanas", nombre:"Playa Avellanas", cod:"PA"}
-];
+let LUGARES = [];
+// Solo para pasar datos guardados con la versión anterior (lugares fijos)
+const LUGARES_ANTERIORES = {langosta:["Playa Langosta","PL"], rodera:["Rodera","RD"], bonita:["Playa Bonita","PB"], avellanas:["Playa Avellanas","PA"]};
 
 /* ===================== Catálogo (del formulario de Microsoft Forms) ===================== */
-const SECTORES = ["Vías principales","Senderos","Áreas verdes","Áreas de playa","Entorno de Golf","Subestaciones / Cuartos de bomba","Villas / Condominios","Otras áreas del Master Easement"];
 const CATEGORIAS = {
   "Mobiliario interior": ["Silletería y bancas","Mesas, barras y escritorios","Tapicería y sofás","Muebles de almacenamiento (estantes, armarios)"],
   "Mobiliario exterior": ["Madera tratada","Aluminio / metal","Ratán sintético / fibras","Sombrillas, toldos y lonas","Plástico / polipropileno"],
@@ -239,7 +238,8 @@ const CATEGORIAS = {
   "Iluminación y sistema eléctrico": ["Luces de senderos","Luminarias de postes","Iluminación ornamental","Cajas de breakers","Tomas exteriores","Plafones","Tableros"],
   "Equipamiento y maquinaria": ["Bombas y motores de agua","Riego automatizado","Aire acondicionado","Plantas eléctricas","Transformadores","Pararrayos","Línea blanca y refrigeración comercial"],
   "Señalización": ["Rótulos informativos","Rótulos viales","Basureros y reciclaje"],
-  "Amenidades": ["Baños de playa","Duchas de playa","Lavapiés","Extintores"]
+  "Amenidades": ["Baños de playa","Duchas de playa","Lavapiés","Extintores"],
+  "Paisajismo y áreas verdes": ["Sistema de riego","Coberturas vivas y césped","Árboles","Jardineras y vegetación arbustiva","Obras de contención para áreas verdes","Drenaje superficial","Canales verdes"]
 };
 const ESTADOS = [
   {v:"Excelente",     cls:"exc", d:"Prácticamente nuevo, sin marcas de deterioro"},
@@ -297,9 +297,36 @@ const DB = (() => {
 })();
 
 function estadoInicial(){
-  const lugares = {};
-  LUGARES.forEach(l => lugares[l.id] = {estado:"pendiente", responsable:"", fecha:"", fechaFin:"", seq:0, activos:[]});
-  return {v:1, lugares, ultimoResp:""};
+  return {v:2, lugares:{}, listaLugares:[], ultimoResp:""};
+}
+// Datos de la versión con lugares fijos: se conservan los lugares que ya tenían trabajo
+function migrar(st){
+  if(!st.lugares) st.lugares = {};
+  if(!Array.isArray(st.listaLugares)){
+    st.listaLugares = [];
+    for(const [id,d] of Object.entries(st.lugares)){
+      if(d.estado==="pendiente" && !(d.activos||[]).length){ delete st.lugares[id]; continue; }
+      const a = LUGARES_ANTERIORES[id] || [id, id.slice(0,2).toUpperCase()];
+      st.listaLugares.push({id, nombre:a[0], cod:a[1]});
+    }
+    st.v = 2;
+  }
+  return st;
+}
+function usarEstado(st){ S = migrar(st); LUGARES = S.listaLugares; }
+// Iniciales del nombre para el ID: "Playa Langosta" → PL, "Rodera" → RO
+function codigoLugar(nombre){
+  const base = nombre.normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/[^A-Z0-9 ]/g," ");
+  const pal = base.split(/\s+/).filter(p => p && !["DE","DEL","LA","EL","LOS","LAS","Y"].includes(p));
+  let cod = pal.length>1 ? pal.slice(0,3).map(p=>p[0]).join("") : (pal[0]||"LG").slice(0,2);
+  let final = cod, n = 2;
+  while(LUGARES.some(l => l.cod===final)) final = cod + (n++);
+  return final;
+}
+const normal = s => s.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+function lugarParecido(nombre){
+  const n = normal(nombre); if(!n) return null;
+  return LUGARES.find(l => { const m = normal(l.nombre); return m===n || m.includes(n) || n.includes(m); }) || null;
 }
 let S = null;
 const guardar = () => DB.set("estado", S);
@@ -314,7 +341,7 @@ const L = id => { if(!S.lugares[id]) S.lugares[id] = {estado:"pendiente", respon
 const totalActivos = () => LUGARES.reduce((n,l) => n + L(l.id).activos.length, 0);
 const totalUnidades = () => LUGARES.reduce((n,l) => n + L(l.id).activos.reduce((m,a)=>m+(+a.cantidad||0),0), 0);
 const completos = () => LUGARES.filter(l => L(l.id).estado==="completo").length;
-const todoCompleto = () => completos()===LUGARES.length;
+const todoCompleto = () => LUGARES.length>0 && completos()===LUGARES.length;
 const clsEstado = v => (ESTADOS.find(e=>e.v===v)||{cls: v===PD?"pd":"na"}).cls;
 let toastT;
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true, 2600); }
@@ -447,10 +474,10 @@ function vHome(app){
   on("respaldo", e=>exportarRespaldo(e.currentTarget));
   on("borrar", ()=>{ UI.borrar=true; render(); });
   on("borNo", ()=>{ UI.borrar=false; render(); });
-  on("borSi", async ()=>{ await DB.clear(); for(const k in TH) delete TH[k]; S=estadoInicial(); await guardar(); UI={}; toast("Datos borrados"); render(); });
+  on("borSi", async ()=>{ await DB.clear(); for(const k in TH) delete TH[k]; usarEstado(estadoInicial()); await guardar(); UI={}; toast("Datos borrados"); render(); });
   on("impNo", ()=>{ UI.importar=null; render(); });
   on("impSi", async ()=>{ const d=UI.importar.data; await DB.clear(); for(const k in TH) delete TH[k];
-    S=d.estado; for(const [k,v] of Object.entries(d.fotos||{})) await DB.set(k,v); await guardar(); UI={}; toast("Copia restaurada"); render(); });
+    usarEstado(d.estado); for(const [k,v] of Object.entries(d.fotos||{})) await DB.set(k,v); await guardar(); UI={}; toast("Copia restaurada"); render(); });
   const imp=document.getElementById("importar");
   if(imp) imp.onchange = async () => {
     const file=imp.files[0]; if(!file) return;
@@ -464,13 +491,17 @@ function vHome(app){
 
 /* ===================== Vista: lugares ===================== */
 function vLugares(app){
-  $("#topTitle").textContent="Elige el lugar";
+  $("#topTitle").textContent="Lugares";
   app.innerHTML = `
   <div class="site-head">
-    <div class="eyebrow">${completos()} de ${LUGARES.length} completos</div>
+    <div class="eyebrow">${LUGARES.length ? `${completos()} de ${LUGARES.length} completos` : "Sin lugares todavía"}</div>
     <h2>¿Dónde vas a levantar?</h2>
   </div>
   <div class="sites">
+    <button class="scard new" id="nuevoLugar" type="button">
+      <strong>+ Nuevo lugar</strong>
+      <small>Escribe el nombre del lugar que vas a levantar</small>
+    </button>
     ${LUGARES.map(l => { const d=L(l.id); const n=d.activos.length;
       const pill = d.estado==="completo" ? `<span class="pill fin">✓ Completo</span>` : d.estado==="en_curso" ? `<span class="pill prog">En curso</span>` : `<span class="pill na">Pendiente</span>`;
       return `<button class="scard ${d.estado==="completo"?"done":d.estado==="en_curso"?"prog":""}" data-l="${l.id}" type="button">
@@ -479,37 +510,66 @@ function vLugares(app){
         ${pill}
       </button>`; }).join("")}
   </div>`;
+  $("#nuevoLugar").onclick = () => ir({name:"inicio", id:null});
   app.querySelectorAll("[data-l]").forEach(b => b.onclick = () => {
     const id=b.dataset.l; ir(L(id).estado==="pendiente" ? {name:"inicio", id} : {name:"lugar", id});
   });
 }
 
-/* ===================== Vista: datos del levantamiento ===================== */
+/* ===================== Vista: nuevo lugar y datos del levantamiento ===================== */
 function vInicio(app, footIn, foot){
-  const l=lugarCfg(V.id);
-  $("#topTitle").textContent=l.nombre;
-  if(!UI.ini) UI.ini={resp:S.ultimoResp||"", fecha:hoy()};
+  const l = V.id ? lugarCfg(V.id) : null;   // null = lugar nuevo que se escribe aquí
+  $("#topTitle").textContent = l ? l.nombre : "Nuevo lugar";
+  if(!UI.ini) UI.ini={nombre:"", resp:S.ultimoResp||"", fecha:hoy()};
+  const e = UI.iniErr || {};
   app.innerHTML = `
   <div class="site-head">
     <div class="eyebrow">Nuevo levantamiento</div>
-    <h2>${esc(l.nombre)}</h2>
+    <h2>${l ? esc(l.nombre) : "¿Qué lugar vas a levantar?"}</h2>
   </div>
   <div class="stack" style="gap:18px">
-    <label class="f ${UI.iniErr?"bad":""}"><span class="lbl">Responsable del levantamiento <span class="req-mark">*</span></span>
+    ${l ? "" : `<label class="f ${e.nombre?"bad":""}"><span class="lbl">Nombre del lugar <span class="req-mark">*</span></span>
+      <span class="hint">Ej. Playa Langosta, Entrada principal, Club de playa</span>
+      <input type="text" id="iniNombre" value="${esc(UI.ini.nombre)}" autocapitalize="words">
+      ${e.nombre?`<span class="err">${e.nombre}</span>`:""}</label>`}
+    <label class="f ${e.resp?"bad":""}"><span class="lbl">Responsable del levantamiento <span class="req-mark">*</span></span>
       <input type="text" id="iniResp" value="${esc(UI.ini.resp)}" placeholder="Nombre y apellido" autocomplete="name">
-      ${UI.iniErr?`<span class="err">Escribe tu nombre para continuar</span>`:""}</label>
+      ${e.resp?`<span class="err">Escribe tu nombre para continuar</span>`:""}</label>
     <label class="f"><span class="lbl">Fecha</span><input type="date" id="iniFecha" value="${esc(UI.ini.fecha)}"></label>
   </div>`;
   foot.hidden=false;
-  footIn.innerHTML=`<button class="btn" id="iniGo" type="button">Empezar levantamiento</button>`;
-  $("#iniResp").oninput=e=>UI.ini.resp=e.target.value;
-  $("#iniResp").onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); e.target.blur(); $("#iniGo").click(); } };
-  $("#iniFecha").oninput=e=>UI.ini.fecha=e.target.value;
-  $("#iniGo").onclick=async()=>{
-    const r=UI.ini.resp.trim(); if(!r){ UI.iniErr=true; render(); $("#iniResp").focus(); return; }
-    const d=L(V.id); d.estado="en_curso"; d.responsable=r; d.fecha=UI.ini.fecha||hoy(); S.ultimoResp=r;
-    await guardar(); ir({name:"lugar", id:V.id});
-  };
+  if(UI.parecido){
+    const p=UI.parecido;
+    footIn.innerHTML=`<div class="confirm">
+      <b>Ya existe “${esc(p.nombre)}”</b>
+      <span class="small">¿Es el mismo lugar? Si lo es, sigue en ese para no duplicarlo.</span>
+      <div class="row2"><button class="btn sec small" id="pCrear" type="button">Crear uno nuevo</button><button class="btn small" id="pUsar" type="button">Ir a ${esc(p.nombre)}</button></div></div>`;
+    $("#pUsar").onclick=()=>ir(L(p.id).estado==="pendiente" ? {name:"inicio", id:p.id} : {name:"lugar", id:p.id});
+    $("#pCrear").onclick=()=>empezar(true);
+  } else {
+    footIn.innerHTML=`<button class="btn" id="iniGo" type="button">Empezar levantamiento</button>`;
+    $("#iniGo").onclick=()=>empezar(false);
+  }
+  const nom=$("#iniNombre"); if(nom) nom.oninput=ev=>{ UI.ini.nombre=ev.target.value; if(UI.parecido){ UI.parecido=null; footIn.innerHTML=`<button class="btn" id="iniGo" type="button">Empezar levantamiento</button>`; $("#iniGo").onclick=()=>empezar(false); ajustarEspacio(); } };
+  $("#iniResp").oninput=ev=>UI.ini.resp=ev.target.value;
+  $("#iniResp").onkeydown=ev=>{ if(ev.key==="Enter"){ ev.preventDefault(); ev.target.blur(); empezar(false); } };
+  $("#iniFecha").oninput=ev=>UI.ini.fecha=ev.target.value;
+
+  async function empezar(forzar){
+    const nombre=(UI.ini.nombre||"").trim().replace(/\s+/g," "), r=UI.ini.resp.trim(), err={};
+    if(!l && !nombre) err.nombre="Escribe el nombre del lugar";
+    if(!r) err.resp=true;
+    if(Object.keys(err).length){ UI.iniErr=err; UI.parecido=null; render(); const f=$(err.nombre?"#iniNombre":"#iniResp"); if(f) f.focus(); return; }
+    let id = V.id;
+    if(!l){
+      const p = forzar ? null : lugarParecido(nombre);
+      if(p){ UI.iniErr=null; UI.parecido=p; render(); return; }
+      id = "l" + Date.now().toString(36);
+      LUGARES.push({id, nombre, cod:codigoLugar(nombre)});
+    }
+    const d=L(id); d.estado="en_curso"; d.responsable=r; d.fecha=UI.ini.fecha||hoy(); S.ultimoResp=r;
+    await guardar(); ir({name:"lugar", id});
+  }
 }
 
 /* ===================== Vista: lugar con su lista de activos ===================== */
@@ -536,7 +596,14 @@ function vLugar(app, footIn, foot){
       </div>
     </li>`).join("")}</ul>`
   : `<div class="empty"><b>Aún no hay activos</b><span>Toca “Agregar activo” para registrar el primero. Cada mesa, luminaria o rótulo con placa va por separado.</span></div>`}
-  ${cerrado?`<div style="margin-top:16px"><button class="btn ghost" id="reabrir" type="button">Reabrir levantamiento para corregir</button></div>`:""}`;
+  ${cerrado?`<div style="margin-top:16px"><button class="btn ghost" id="reabrir" type="button">Reabrir levantamiento para corregir</button></div>`:""}
+  ${!cerrado && !d.activos.length ? (UI.borrarLugar
+    ? `<div class="confirm red" style="margin-top:16px"><b>¿Eliminar ${esc(l.nombre)}?</b><span class="small">Se quita de la lista de lugares. No tiene activos registrados.</span>
+       <div class="row2"><button class="btn sec small" id="blNo" type="button">Cancelar</button><button class="btn danger small" id="blSi" type="button">Eliminar</button></div></div>`
+    : `<div style="margin-top:16px"><button class="btn ghost" id="borrarLugar" type="button">Eliminar este lugar (creado por error)</button></div>`) : ""}`;
+  const bl=$("#borrarLugar"); if(bl) bl.onclick=()=>{ UI.borrarLugar=true; rerender(); };
+  const blNo=$("#blNo"); if(blNo) blNo.onclick=()=>{ UI.borrarLugar=false; rerender(); };
+  const blSi=$("#blSi"); if(blSi) blSi.onclick=async()=>{ const i=LUGARES.findIndex(x=>x.id===V.id); if(i>=0) LUGARES.splice(i,1); delete S.lugares[V.id]; await guardar(); toast(`${l.nombre} eliminado`); ir({name:"lugares"}); };
   // miniaturas
   d.activos.forEach(async a => { if(!a.foto1) return; const t=await miniatura(a.id,1); const el=app.querySelector(`[data-th="${CSS.escape(a.id)}"]`); if(el&&t) el.innerHTML=`<img src="${t}" alt="">`; });
   app.querySelectorAll("[data-ed]").forEach(b=>b.onclick=()=>abrirActivo(V.id, b.dataset.ed, false));
@@ -551,8 +618,8 @@ function vLugar(app, footIn, foot){
       <div class="row2"><button class="btn sec small" id="cNo" type="button">Seguir agregando</button><button class="btn small" id="cSi" type="button">Completar</button></div></div>`;
     $("#cNo").onclick=()=>{UI.completar=false; render();};
     $("#cSi").onclick=async()=>{ d.estado="completo"; d.fechaFin=hoy(); await guardar();
-      toast(todoCompleto()?"¡Todos los lugares completos! Ya puedes descargar el Excel":`${l.nombre} completado`);
-      ir(todoCompleto()?{name:"home"}:{name:"lugares"}); };
+      toast(todoCompleto()?`${l.nombre} completado. El Excel ya está disponible en el inicio`:`${l.nombre} completado`);
+      ir({name:"lugares"}); };
   } else {
     footIn.innerHTML=`<div class="row2">
       <button class="btn" id="add" type="button">+ Agregar activo</button>
@@ -581,7 +648,6 @@ async function abrirActivo(lugarId, activoId, duplicar){
   const nuevo = !activoId || duplicar;
   F = {
     lugar:lugarId, editId: nuevo?null:activoId,
-    sector: grupoDesde(base&&base.sector, SECTORES),
     ubicacion: base?base.ubicacion:"",
     categoria: grupoDesde(base&&base.categoria, Object.keys(CATEGORIAS)),
     subcategoria: {sel:null, otro:""},
@@ -646,11 +712,10 @@ function vActivo(app, footIn, foot){
   const est=valorGrupo(F.estado);
   const detReq=pideDetalle(est);
   app.innerHTML = `
-  ${F.heredado?`<p class="note" style="margin-top:12px">Sector, ubicación y categoría vienen del activo anterior. Cámbialos si este es distinto.</p>`:""}
+  ${F.heredado?`<p class="note" style="margin-top:12px">La ubicación y la categoría vienen del activo anterior. Cámbialos si este es distinto.</p>`:""}
   ${V.dup?`<p class="note" style="margin-top:12px">Copia del activo. Revisa el estado, escribe la placa y toma las fotos de este.</p>`:""}
   <section class="step">
     <h3>Paso 1 · Ubicación</h3>
-    ${campo("sector","Sector", chips("sector", SECTORES, F.sector))}
     <label class="f ${F.errores.ubicacion?"bad":""}" id="c-ubicacion"><span class="lbl">Ubicación específica <span class="req-mark">*</span></span>
       <span class="hint">Ej. entrada al sendero, frente al rancho, margen del lago</span>
       <input type="text" id="fUbic" value="${esc(F.ubicacion)}">${F.errores.ubicacion?`<span class="err">${F.errores.ubicacion}</span>`:""}</label>
@@ -730,7 +795,7 @@ function vActivo(app, footIn, foot){
 function rerender(){ const y=window.scrollY; render(); window.scrollTo(0,y); }
 
 function elegir(grupo, i){
-  const opts = {sector:SECTORES, categoria:Object.keys(CATEGORIAS), subcategoria:subOpciones(), estado:ESTADOS.map(e=>e.v), factores:FACTORES, accion:ACCIONES}[grupo];
+  const opts = {categoria:Object.keys(CATEGORIAS), subcategoria:subOpciones(), estado:ESTADOS.map(e=>e.v), factores:FACTORES, accion:ACCIONES}[grupo];
   const v = i==="otro" ? "__otro" : i==="pd" ? PD : opts[+i];
   const g = F[grupo];
   if(grupo==="factores"){
@@ -753,7 +818,6 @@ function elegir(grupo, i){
 function validar(){
   const e={}; const falta="Falta completar"; const otro="Escribe cuál es";
   const chk=(k,g)=>{ if(!g.sel) e[k]=falta; else if(g.sel==="__otro" && !g.otro.trim()) e[k]=otro; };
-  chk("sector",F.sector);
   if(!F.ubicacion.trim()) e.ubicacion=falta;
   chk("categoria",F.categoria);
   if(F.categoria.sel) chk("subcategoria",F.subcategoria);
@@ -775,7 +839,7 @@ async function guardarActivo(otroIgual){
   let id=F.editId;
   if(!id){ d.seq=(d.seq||0)+1; id=`ME-${l.cod}-${String(d.seq).padStart(3,"0")}`; }
   const a = {
-    id, sector:valorGrupo(F.sector), ubicacion:F.ubicacion.trim(),
+    id, ubicacion:F.ubicacion.trim(),
     categoria:valorGrupo(F.categoria), subcategoria:valorGrupo(F.subcategoria),
     codigo:F.sinCodigo?SC:F.codigo.trim(), descripcion:F.descripcion.trim(),
     cantidad:F.sinCodigo?parseInt(F.cantidad):1,
@@ -792,7 +856,7 @@ async function guardarActivo(otroIgual){
 
 /* ===================== Excel único ===================== */
 const COLS = [
-  {h:"ID activo",w:13},{h:"Lugar",w:18},{h:"Sector",w:22},{h:"Ubicación específica",w:28},
+  {h:"ID activo",w:13},{h:"Lugar",w:18},{h:"Ubicación específica",w:30},
   {h:"Categoría",w:24},{h:"Subcategoría",w:26},{h:"Código / placa",w:14},{h:"Descripción",w:38},{h:"Cantidad",w:10},
   {h:"Estado",w:14},{h:"Factores de deterioro",w:30},{h:"Acción sugerida",w:30},{h:"Observaciones",w:36},
   {h:"Foto general",w:15,foto:1},{h:"Foto detalle",w:15,foto:2},
@@ -821,16 +885,16 @@ async function exportarExcel(parcial, btn){
       const d=L(l.id);
       for(const a of d.activos){
         const row=ws.getRow(r);
-        row.values=[a.id,l.nombre,a.sector,a.ubicacion,a.categoria,a.subcategoria,a.codigo,a.descripcion,+a.cantidad,a.estado,(a.factores||[]).join(", "),a.accion,a.obs,"","",d.responsable,d.fecha?new Date(d.fecha+"T12:00:00"):null];
-        row.getCell(17).numFmt="dd/mm/yyyy";
+        row.values=[a.id,l.nombre,a.ubicacion,a.categoria,a.subcategoria,a.codigo,a.descripcion,+a.cantidad,a.estado,(a.factores||[]).join(", "),a.accion,a.obs,"","",d.responsable,d.fecha?new Date(d.fecha+"T12:00:00"):null];
+        row.getCell(16).numFmt="dd/mm/yyyy";
         row.alignment={vertical:"middle",wrapText:true};
-        row.getCell(9).alignment={vertical:"middle",horizontal:"center"};
+        row.getCell(8).alignment={vertical:"middle",horizontal:"center"};
         let conFoto=false;
         for(const n of [1,2]){
           if(!a["foto"+n]) continue;
           const f=await DB.get(`f:${a.id}:${n}`); if(!f) continue;
           const img=wb.addImage({base64:f.thumb, extension:"jpeg"});
-          ws.addImage(img,{tl:{col:12+n+0.08,row:r-1+0.08},ext:{width:96,height:72},editAs:"oneCell"});
+          ws.addImage(img,{tl:{col:11+n+0.08,row:r-1+0.08},ext:{width:96,height:72},editAs:"oneCell"});
           conFoto=true;
         }
         row.height = conFoto ? 62 : 30;
@@ -841,27 +905,27 @@ async function exportarExcel(parcial, btn){
     // Listas desplegables para que el encargado agregue activos a mano con los mismos valores
     const lista = arr => ['"'+arr.join(",")+'"'];
     const listas = {
-      5: lista(Object.keys(CATEGORIAS).concat(PD)),
-      10: lista(ESTADOS.map(e=>e.v).concat(PD)),
-      12: lista(ACCIONES.concat(PD)),
-      18: lista(["Alta","Media","Baja"]),
-      21: lista(["Pendiente","En proceso","Resuelto","No aplica"])
+      4: lista(Object.keys(CATEGORIAS).concat(PD)),
+      9: lista(ESTADOS.map(e=>e.v).concat(PD)),
+      11: lista(ACCIONES.concat(PD)),
+      17: lista(["Alta","Media","Baja"]),
+      20: lista(["Pendiente","En proceso","Resuelto","No aplica"])
     };
     for(let i=2;i<=hasta;i++) for(const [c,f] of Object.entries(listas))
       ws.getCell(i,+c).dataValidation={type:"list",allowBlank:true,formulae:f,showErrorMessage:false};
     // Colores por estado, también para filas nuevas
     const fill=(bg,fg)=>({fill:{type:"pattern",pattern:"solid",bgColor:{argb:bg}},font:{color:{argb:fg},bold:true}});
-    ws.addConditionalFormatting({ref:`J2:J${hasta}`,rules:[
+    ws.addConditionalFormatting({ref:`I2:I${hasta}`,rules:[
       {type:"containsText",operator:"containsText",text:"Excelente",priority:1,style:fill("FFE2EEDF","FF2D5F2A")},
       {type:"containsText",operator:"containsText",text:"Bueno",priority:2,style:fill("FFE7F1E3","FF3F7A3A")},
       {type:"containsText",operator:"containsText",text:"Regular",priority:3,style:fill("FFFBEFD9","FFA46A12")},
       {type:"containsText",operator:"containsText",text:"Crítico",priority:4,style:fill("FFFBE4E1","FFB3261E")},
       {type:"containsText",operator:"containsText",text:"descarte",priority:5,style:fill("FFE9E9E4","FF4A4A40")}
     ]});
-    ws.addConditionalFormatting({ref:`B2:L${hasta}`,rules:[
+    ws.addConditionalFormatting({ref:`B2:K${hasta}`,rules:[
       {type:"containsText",operator:"containsText",text:PD,priority:6,style:fill("FFFBF1C7","FF7A6200")}
     ]});
-    ws.addConditionalFormatting({ref:`U2:U${hasta}`,rules:[
+    ws.addConditionalFormatting({ref:`T2:T${hasta}`,rules:[
       {type:"containsText",operator:"containsText",text:"Resuelto",priority:7,style:fill("FFE7F1E3","FF3F7A3A")},
       {type:"containsText",operator:"containsText",text:"En proceso",priority:8,style:fill("FFFBEFD9","FFA46A12")}
     ]});
@@ -881,7 +945,7 @@ async function exportarFotos(btn){
     const zip=new JSZip(); let n=0;
     for(const l of LUGARES) for(const a of L(l.id).activos) for(const k of [1,2]){
       if(!a["foto"+k]) continue; const f=await DB.get(`f:${a.id}:${k}`); if(!f) continue;
-      zip.folder(l.nombre).file(`${a.id}_${k===1?"general":"detalle"}.jpg`, f.full.split(",")[1], {base64:true}); n++;
+      zip.folder(l.nombre.replace(/[\\/:*?"<>|]/g,"-")).file(`${a.id}_${k===1?"general":"detalle"}.jpg`, f.full.split(",")[1], {base64:true}); n++;
     }
     if(!n){ toast("Todavía no hay fotos"); return; }
     const blob=await zip.generateAsync({type:"blob"});
@@ -903,8 +967,8 @@ async function exportarRespaldo(btn){
 /* ===================== Arranque ===================== */
 (async () => {
   $("#topLogo").src=LOGO;
-  try{ S = await DB.get("estado"); }catch(e){ S=null; }
-  if(!S || !S.lugares) S=estadoInicial();
+  let st=null; try{ st = await DB.get("estado"); }catch(e){ st=null; }
+  usarEstado(st && st.lugares ? st : estadoInicial());
   LUGARES.forEach(l=>L(l.id));
   render();
 })();
