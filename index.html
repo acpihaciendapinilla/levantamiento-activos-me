@@ -371,7 +371,9 @@ async function entregarArchivo(blob, nombre, titulo){
       if(dl){ try{ await dl.save({filename:nombre,data:blob}); toast("Archivo listo"); hecho=true; }
         catch(err){ hecho=true; if(err&&err.code==="declined") toast("Descarga cancelada"); else if(err&&err.code==="rate_limited") toast("Espera un momento e intenta de nuevo"); else hecho=false; } } }catch(e){}
   }
-  if(!hecho && navigator.canShare){
+  // El menú de Compartir solo en celulares y tabletas; en computadora (Mac o Windows) se descarga directo
+  const esCelular = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
+  if(!hecho && esCelular && navigator.canShare){
     try{ const file=new File([blob],nombre,{type:blob.type});
       if(navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:titulo}); hecho=true; } }
     catch(e){ if(e&&e.name==="AbortError") hecho=true; }
