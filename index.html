@@ -432,7 +432,7 @@ function vHome(app){
     ${listo ? `
       <div class="panel" style="align-items:center;text-align:center">
         <div class="seal">✓</div>
-        <b>Todos los lugares tienen su levantamiento completo.</b>
+        <b>Todos los lugares tienen su registro completo.</b>
         <span class="small muted">Descarga el Excel con los ${act} activos. Es la base para darles seguimiento.</span>
       </div>
       <div class="stack">
@@ -440,19 +440,19 @@ function vHome(app){
         <button class="btn sec" id="goLug" type="button">Ver lugares</button>
       </div>` : `
       ${enCurso ? `<button class="panel" id="seguir" type="button" style="border:0;color:inherit;font:inherit;cursor:pointer">
-        <span class="eyebrow">Levantamiento en curso</span>
+        <span class="eyebrow">Registro en curso</span>
         <b style="font-size:18px">${esc(enCurso.nombre)}</b>
         <span class="small muted">${L(enCurso.id).activos.length} activos · ${esc(L(enCurso.id).responsable)} · Toca para continuar</span>
       </button>` : ""}
       <div class="stack">
-        <button class="btn" id="goLug" type="button">Hacer levantamiento</button>
+        <button class="btn" id="goLug" type="button">Registrar activos</button>
       </div>`}
     <div class="tools">
       ${!listo && act ? `<button class="tool" id="xlsAvance" type="button"><span><b>Descargar avance en Excel</b><small>Incluye lo registrado hasta ahora, aunque falten lugares</small></span><span class="chev">›</span></button>` : ""}
       ${act ? `<button class="tool" id="zipFotos" type="button"><span><b>Descargar fotos</b><small>Archivo .zip con las fotos en tamaño completo, nombradas con el ID del activo</small></span><span class="chev">›</span></button>` : ""}
       ${act ? `<button class="tool" id="respaldo" type="button"><span><b>Guardar copia de respaldo</b><small>Los datos viven en este celular. Guarda una copia por si se borra el navegador</small></span><span class="chev">›</span></button>` : ""}
       <div class="tool"><span><b>Restaurar desde una copia</b><small>Abre un archivo de respaldo (.json) guardado antes</small></span><span class="chev">›</span><input type="file" id="importar" accept=".json,application/json" aria-label="Restaurar desde una copia"></div>
-      ${act ? `<button class="tool" id="borrar" type="button"><span><b style="color:var(--urg)">Borrar todo y empezar de nuevo</b><small>Para un levantamiento nuevo. Descarga antes el Excel</small></span><span class="chev">›</span></button>` : ""}
+      ${act ? `<button class="tool" id="borrar" type="button"><span><b style="color:var(--urg)">Borrar todo y empezar de nuevo</b><small>Para un registro nuevo. Descarga antes el Excel</small></span><span class="chev">›</span></button>` : ""}
     </div>
     ${UI.importar ? `<div class="confirm" style="width:100%;text-align:left">
         <b>¿Reemplazar los datos de este celular?</b>
@@ -495,12 +495,12 @@ function vLugares(app){
   app.innerHTML = `
   <div class="site-head">
     <div class="eyebrow">${LUGARES.length ? `${completos()} de ${LUGARES.length} completos` : "Sin lugares todavía"}</div>
-    <h2>¿Dónde vas a levantar?</h2>
+    <h2>¿Dónde vas a trabajar hoy?</h2>
   </div>
   <div class="sites">
     <button class="scard new" id="nuevoLugar" type="button">
       <strong>+ Nuevo lugar</strong>
-      <small>Escribe el nombre del lugar que vas a levantar</small>
+      <small>Escribe el lugar donde vas a registrar activos</small>
     </button>
     ${LUGARES.map(l => { const d=L(l.id); const n=d.activos.length;
       const pill = d.estado==="completo" ? `<span class="pill fin">✓ Completo</span>` : d.estado==="en_curso" ? `<span class="pill prog">En curso</span>` : `<span class="pill na">Pendiente</span>`;
@@ -524,15 +524,15 @@ function vInicio(app, footIn, foot){
   const e = UI.iniErr || {};
   app.innerHTML = `
   <div class="site-head">
-    <div class="eyebrow">Nuevo levantamiento</div>
-    <h2>${l ? esc(l.nombre) : "¿Qué lugar vas a levantar?"}</h2>
+    <div class="eyebrow">Nuevo registro</div>
+    <h2>${l ? esc(l.nombre) : "¿En qué lugar vas a trabajar?"}</h2>
   </div>
   <div class="stack" style="gap:18px">
     ${l ? "" : `<label class="f ${e.nombre?"bad":""}"><span class="lbl">Nombre del lugar <span class="req-mark">*</span></span>
       <span class="hint">Ej. Playa Langosta, Entrada principal, Club de playa</span>
       <input type="text" id="iniNombre" value="${esc(UI.ini.nombre)}" autocapitalize="words">
       ${e.nombre?`<span class="err">${e.nombre}</span>`:""}</label>`}
-    <label class="f ${e.resp?"bad":""}"><span class="lbl">Responsable del levantamiento <span class="req-mark">*</span></span>
+    <label class="f ${e.resp?"bad":""}"><span class="lbl">Responsable del registro <span class="req-mark">*</span></span>
       <input type="text" id="iniResp" value="${esc(UI.ini.resp)}" placeholder="Nombre y apellido" autocomplete="name">
       ${e.resp?`<span class="err">Escribe tu nombre para continuar</span>`:""}</label>
     <label class="f"><span class="lbl">Fecha</span><input type="date" id="iniFecha" value="${esc(UI.ini.fecha)}"></label>
@@ -547,10 +547,10 @@ function vInicio(app, footIn, foot){
     $("#pUsar").onclick=()=>ir(L(p.id).estado==="pendiente" ? {name:"inicio", id:p.id} : {name:"lugar", id:p.id});
     $("#pCrear").onclick=()=>empezar(true);
   } else {
-    footIn.innerHTML=`<button class="btn" id="iniGo" type="button">Empezar levantamiento</button>`;
+    footIn.innerHTML=`<button class="btn" id="iniGo" type="button">Empezar registro</button>`;
     $("#iniGo").onclick=()=>empezar(false);
   }
-  const nom=$("#iniNombre"); if(nom) nom.oninput=ev=>{ UI.ini.nombre=ev.target.value; if(UI.parecido){ UI.parecido=null; footIn.innerHTML=`<button class="btn" id="iniGo" type="button">Empezar levantamiento</button>`; $("#iniGo").onclick=()=>empezar(false); ajustarEspacio(); } };
+  const nom=$("#iniNombre"); if(nom) nom.oninput=ev=>{ UI.ini.nombre=ev.target.value; if(UI.parecido){ UI.parecido=null; footIn.innerHTML=`<button class="btn" id="iniGo" type="button">Empezar registro</button>`; $("#iniGo").onclick=()=>empezar(false); ajustarEspacio(); } };
   $("#iniResp").oninput=ev=>UI.ini.resp=ev.target.value;
   $("#iniResp").onkeydown=ev=>{ if(ev.key==="Enter"){ ev.preventDefault(); ev.target.blur(); empezar(false); } };
   $("#iniFecha").oninput=ev=>UI.ini.fecha=ev.target.value;
@@ -583,7 +583,7 @@ function vLugar(app, footIn, foot){
     <h2>${esc(l.nombre)}</h2>
     <div class="meta"><span>${esc(d.responsable)}</span><span>${fmtFecha(d.fecha)}</span>${cerrado&&d.fechaFin?`<span>Completado ${fmtFecha(d.fechaFin)}</span>`:""}</div>
   </div>
-  ${cerrado?`<div class="locked">✓ Levantamiento completo</div>`:""}
+  ${cerrado?`<div class="locked">✓ Registro completo</div>`:""}
   ${d.activos.length ? `<ul class="alist">${d.activos.slice().reverse().map(a=>`
     <li class="acard">
       <div class="th" data-th="${esc(a.id)}">${a.foto1?"":"Sin foto"}</div>
@@ -596,7 +596,7 @@ function vLugar(app, footIn, foot){
       </div>
     </li>`).join("")}</ul>`
   : `<div class="empty"><b>Aún no hay activos</b><span>Toca “Agregar activo” para registrar el primero. Cada mesa, luminaria o rótulo con placa va por separado.</span></div>`}
-  ${cerrado?`<div style="margin-top:16px"><button class="btn ghost" id="reabrir" type="button">Reabrir levantamiento para corregir</button></div>`:""}
+  ${cerrado?`<div style="margin-top:16px"><button class="btn ghost" id="reabrir" type="button">Reabrir registro para corregir</button></div>`:""}
   ${!cerrado && !d.activos.length ? (UI.borrarLugar
     ? `<div class="confirm red" style="margin-top:16px"><b>¿Eliminar ${esc(l.nombre)}?</b><span class="small">Se quita de la lista de lugares. No tiene activos registrados.</span>
        <div class="row2"><button class="btn sec small" id="blNo" type="button">Cancelar</button><button class="btn danger small" id="blSi" type="button">Eliminar</button></div></div>`
@@ -608,7 +608,7 @@ function vLugar(app, footIn, foot){
   d.activos.forEach(async a => { if(!a.foto1) return; const t=await miniatura(a.id,1); const el=app.querySelector(`[data-th="${CSS.escape(a.id)}"]`); if(el&&t) el.innerHTML=`<img src="${t}" alt="">`; });
   app.querySelectorAll("[data-ed]").forEach(b=>b.onclick=()=>abrirActivo(V.id, b.dataset.ed, false));
   app.querySelectorAll("[data-dup]").forEach(b=>b.onclick=()=>abrirActivo(V.id, b.dataset.dup, true));
-  const re=$("#reabrir"); if(re) re.onclick=async()=>{ d.estado="en_curso"; d.fechaFin=""; await guardar(); toast("Levantamiento reabierto"); render(); };
+  const re=$("#reabrir"); if(re) re.onclick=async()=>{ d.estado="en_curso"; d.fechaFin=""; await guardar(); toast("Registro reabierto"); render(); };
   if(cerrado) return;
   foot.hidden=false;
   if(UI.completar){
@@ -623,7 +623,7 @@ function vLugar(app, footIn, foot){
   } else {
     footIn.innerHTML=`<div class="row2">
       <button class="btn" id="add" type="button">+ Agregar activo</button>
-      <button class="btn sec" id="comp" type="button" ${d.activos.length?"":"disabled"}>Completar levantamiento</button></div>`;
+      <button class="btn sec" id="comp" type="button" ${d.activos.length?"":"disabled"}>Completar registro</button></div>`;
     $("#add").onclick=()=>abrirActivo(V.id, null, false);
     $("#comp").onclick=()=>{UI.completar=true; render();};
   }
@@ -860,7 +860,7 @@ const COLS = [
   {h:"Categoría",w:24},{h:"Subcategoría",w:26},{h:"Código / placa",w:14},{h:"Descripción",w:38},{h:"Cantidad",w:10},
   {h:"Estado",w:14},{h:"Factores de deterioro",w:30},{h:"Acción sugerida",w:30},{h:"Observaciones",w:36},
   {h:"Foto general",w:15,foto:1},{h:"Foto detalle",w:15,foto:2},
-  {h:"Responsable levantamiento",w:22},{h:"Fecha levantamiento",w:14},
+  {h:"Responsable del registro",w:22},{h:"Fecha de registro",w:14},
   // Columnas de seguimiento: quedan vacías para el encargado
   {h:"Prioridad",w:12,seg:1},{h:"Responsable seguimiento",w:22,seg:1},{h:"Fecha programada",w:14,seg:1},
   {h:"Estado seguimiento",w:16,seg:1},{h:"Última revisión",w:14,seg:1},{h:"Notas de seguimiento",w:36,seg:1}
@@ -959,7 +959,7 @@ async function exportarRespaldo(btn){
     const fotos={}; for(const k of await DB.keys()) if(String(k).startsWith("f:")) fotos[k]=await DB.get(k);
     const data={app:"levantamiento-activos-me", v:1, fecha:fmtFecha(hoy()), estado:S, fotos};
     const blob=new Blob([JSON.stringify(data)],{type:"application/json"});
-    await entregarArchivo(blob, `Respaldo_Levantamiento_ME_${hoy()}.json`, "Respaldo del levantamiento");
+    await entregarArchivo(blob, `Respaldo_Registro_Activos_ME_${hoy()}.json`, "Respaldo del registro");
   }catch(e){ toast("No se pudo crear la copia."); }
   finally{ btn.disabled=false; btn.innerHTML=txt; }
 }
