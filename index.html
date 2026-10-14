@@ -218,6 +218,7 @@ body.typing #app{padding-bottom:8px!important}
 <div class="toast" id="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 /* =========================================================
@@ -586,6 +587,7 @@ function vLugar(app, footIn, foot){
     <div class="meta"><span>${esc(d.responsable)}</span><span>${fmtFecha(d.fecha)}</span>${cerrado&&d.fechaFin?`<span>Completado ${fmtFecha(d.fechaFin)}</span>`:""}</div>
   </div>
   ${cerrado?`<div class="locked">✓ Registro completo</div>`:""}
+  ${d.activos.length?`<button class="btn sec small" id="wordLugar" type="button" style="margin-bottom:14px">Descargar reporte en Word</button>`:""}
   ${d.activos.length ? `<ul class="alist">${d.activos.slice().reverse().map(a=>`
     <li class="acard">
       <div class="th" data-th="${esc(a.id)}">${a.foto1?"":"Sin foto"}</div>
@@ -610,6 +612,7 @@ function vLugar(app, footIn, foot){
   d.activos.forEach(async a => { if(!a.foto1) return; const t=await miniatura(a.id,1); const el=app.querySelector(`[data-th="${CSS.escape(a.id)}"]`); if(el&&t) el.innerHTML=`<img src="${t}" alt="">`; });
   app.querySelectorAll("[data-ed]").forEach(b=>b.onclick=()=>abrirActivo(V.id, b.dataset.ed, false));
   app.querySelectorAll("[data-dup]").forEach(b=>b.onclick=()=>abrirActivo(V.id, b.dataset.dup, true));
+  const wl=$("#wordLugar"); if(wl) wl.onclick=e=>exportarWord(V.id, e.currentTarget);
   const re=$("#reabrir"); if(re) re.onclick=async()=>{ d.estado="en_curso"; d.fechaFin=""; await guardar(); toast("Registro reabierto"); render(); };
   if(cerrado) return;
   foot.hidden=false;
@@ -936,6 +939,121 @@ async function exportarExcel(parcial, btn){
     const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     await entregarArchivo(blob, `Activos_MasterEasement_${parcial?"AVANCE_":""}${hoy()}.xlsx`, "Activos Master Easement");
   }catch(e){ console.error(e); toast("No se pudo generar el Excel. Intenta de nuevo."); }
+  finally{ btn.disabled=false; btn.innerHTML=txt; }
+}
+
+/* ===================== Reporte en Word por lugar ===================== */
+const MESES=["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+const MES3=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+const DIAS=["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
+function fechaLarga(f){ if(!f) return ""; const d=new Date(f+"T12:00:00"); const s=`${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`; return s[0].toUpperCase()+s.slice(1); }
+function bytesDe(u){ const b=atob(u.split(",")[1]); const a=new Uint8Array(b.length); for(let i=0;i<b.length;i++) a[i]=b.charCodeAt(i); return a; }
+function cargarImg(u){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=u; }); }
+// Foto lista para Word: máximo 1100 px y ajustada a la caja sin deformarla
+async function fotoWord(u, maxW, maxH){
+  const img=await cargarImg(u);
+  const k=Math.min(1, 1100/Math.max(img.width,img.height));
+  const c=document.createElement("canvas"); c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+  c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+  const r=Math.min(maxW/c.width, maxH/c.height);
+  return {data:bytesDe(c.toDataURL("image/jpeg",0.8)), w:Math.round(c.width*r), h:Math.round(c.height*r)};
+}
+const COLOR_ESTADO={exc:["E2EEDF","2D5F2A"],ok:["E7F1E3","3F7A3A"],bad:["FBEFD9","A46A12"],urg:["FBE4E1","B3261E"],des:["E9E9E4","4A4A40"],pd:["FBF1C7","7A6200"],na:["EEEEEE","555555"]};
+
+async function exportarWord(lugarId, btn){
+  if(!window.docx){ toast("No se pudo cargar el generador de Word. Revisa la señal y recarga."); return; }
+  const l=lugarCfg(lugarId), d=L(lugarId);
+  if(!d.activos.length){ toast("Este lugar todavía no tiene activos"); return; }
+  const txt=btn.innerHTML; btn.disabled=true; btn.innerHTML="Generando Word…";
+  try{
+    const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,ShadingType,AlignmentType,ImageRun,BorderStyle,VerticalAlign,Footer,PageNumber,HeightRule,TableLayoutType}=docx;
+    const FONT="Arial", TINTA="2F2F0E", OLIVA="6F6F33", SUAVE="EEEEDD", GRIS="6B6B52";
+    const W=9972, C=[1800,3186,1800,3186];           // carta, márgenes de 2 cm
+    const L1=C[0]+C[1], L3=C[1]+C[2]+C[3];
+    const linea={style:BorderStyle.SINGLE,size:4,color:"C9C9B4"};
+    const bordes={top:linea,bottom:linea,left:linea,right:linea};
+    const sinBorde={style:BorderStyle.NONE,size:0,color:"FFFFFF"};
+    const p=(text,o={})=>new Paragraph({keepNext:o.keep!==false, alignment:o.align, spacing:{before:o.before||0,after:o.after||0},
+      children:[new TextRun({text:String(text??""),bold:o.bold,color:o.color||TINTA,size:o.size||19,italics:o.italic,font:FONT})]});
+    const celda=(children,w,o={})=>new TableCell({children, width:{size:w,type:WidthType.DXA}, columnSpan:o.span,
+      shading:o.fill?{type:ShadingType.CLEAR,color:"auto",fill:o.fill}:undefined, verticalAlign:o.top?VerticalAlign.TOP:VerticalAlign.CENTER,
+      margins:{top:70,bottom:70,left:110,right:110}, borders:o.borders||bordes});
+    const etq=(t,w,keep)=>celda([p(t,{bold:true,size:17,color:"4A4A22",keep})],w,{fill:SUAVE});
+    const val=(t,w,o={})=>celda([p(t===""||t==null?"—":t,{bold:o.bold,color:o.color,keep:o.keep})],w,{span:o.span,fill:o.fill});
+
+    // Fotos (caja de 3.2 x 2.15 pulgadas a 96 ppp)
+    const fotos={};
+    for(const a of d.activos) for(const n of [1,2]){
+      if(!a["foto"+n]) continue; const f=await DB.get(`f:${a.id}:${n}`); if(!f) continue;
+      fotos[`${a.id}:${n}`]=await fotoWord(f.full, 300, 206);
+    }
+    const celdaFoto=(a,n,titulo)=>{
+      const f=fotos[`${a.id}:${n}`];
+      const img=f ? new Paragraph({keepNext:true, alignment:AlignmentType.CENTER, spacing:{before:60,after:20},
+          children:[new ImageRun({type:"jpg", data:f.data, transformation:{width:f.w,height:f.h}})]})
+        : p("Sin foto",{italic:true,color:"9A9A80",align:AlignmentType.CENTER,before:300,after:300});
+      return celda([p(titulo,{bold:true,size:17,color:"4A4A22"}), img], L1, {span:2, top:true});
+    };
+
+    const ficha=a=>{
+      const cls=clsEstado(a.estado), [bg,fg]=COLOR_ESTADO[cls]||COLOR_ESTADO.na;
+      const fila=(cells,o={})=>new TableRow({children:cells, cantSplit:true, height:o.h?{value:o.h,rule:HeightRule.ATLEAST}:undefined});
+      return new Table({width:{size:W,type:WidthType.DXA}, columnWidths:C, layout:TableLayoutType.FIXED, rows:[
+        fila([celda([p("ID activo",{bold:true,size:17,color:"FFFFFF"})],C[0],{fill:OLIVA}), celda([p(a.id,{bold:true,color:"FFFFFF",size:20})],C[1],{fill:OLIVA}),
+              celda([p("Cantidad",{bold:true,size:17,color:"FFFFFF"})],C[2],{fill:OLIVA}), celda([p(a.cantidad,{bold:true,color:"FFFFFF"})],C[3],{fill:OLIVA})]),
+        fila([etq("Ubicación específica",C[0]), val(a.ubicacion,L3,{span:3})]),
+        fila([etq("Categoría",C[0]), val(a.categoria,C[1]), etq("Subcategoría",C[2]), val(a.subcategoria,C[3])]),
+        fila([etq("Código / placa",C[0]), val(a.codigo,C[1]), etq("Estado",C[2]), val(a.estado,C[3],{bold:true,color:fg,fill:bg})]),
+        fila([etq("Descripción",C[0]), val(a.descripcion,L3,{span:3})]),
+        fila([etq("Factores de deterioro",C[0]), val((a.factores||[]).join(", "),C[1]), etq("Acción sugerida",C[2]), val(a.accion,C[3])]),
+        fila([celdaFoto(a,1,"Foto general"), celdaFoto(a,2,"Foto detalle")]),
+        fila([etq("Observaciones",C[0],false), val(a.obs,L3,{span:3,keep:false})])
+      ]});
+    };
+
+    // Encabezado del reporte
+    const logo=await cargarImg(LOGO);
+    const unidades=d.activos.reduce((m,a)=>m+(+a.cantidad||0),0);
+    const sinB={top:sinBorde,bottom:sinBorde,left:sinBorde,right:sinBorde};
+    const datoCab=(t,v,w)=>celda([p(t,{size:15,color:GRIS,bold:true}),p(v,{size:20,bold:true})],w,{borders:{top:linea,bottom:linea,left:sinBorde,right:sinBorde}});
+    const cab=new Table({width:{size:W,type:WidthType.DXA}, columnWidths:[3324,3324,3324], layout:TableLayoutType.FIXED,
+      rows:[new TableRow({children:[datoCab("LUGAR",l.nombre,3324), datoCab("FECHA",fechaLarga(d.fecha),3324), datoCab("RESPONSABLE",d.responsable,3324)]})]});
+    // Resumen por estado: solo los estados que aparecen
+    const orden=ESTADOS.map(e=>e.v).concat(PD);
+    const conteo=orden.map(v=>[v,d.activos.filter(a=>a.estado===v).length]).filter(x=>x[1]);
+    const otros=d.activos.filter(a=>!orden.includes(a.estado)).length; if(otros) conteo.push(["Otro",otros]);
+    const wc=Math.floor(W/conteo.length), cols=conteo.map((_,i)=>i===conteo.length-1?W-wc*(conteo.length-1):wc);
+    const resumen=new Table({width:{size:W,type:WidthType.DXA}, columnWidths:cols, layout:TableLayoutType.FIXED, rows:[new TableRow({children:conteo.map(([v,n],i)=>{
+      const [bg,fg]=COLOR_ESTADO[v==="Otro"?"na":clsEstado(v)]||COLOR_ESTADO.na;
+      return celda([p(n,{bold:true,size:26,color:fg,align:AlignmentType.CENTER}), p(v,{size:16,color:fg,align:AlignmentType.CENTER})], cols[i], {fill:bg, borders:sinB});
+    })})]});
+
+    const hijos=[
+      new Paragraph({alignment:AlignmentType.CENTER, spacing:{after:120}, children:[new ImageRun({type:"png", data:bytesDe(LOGO), transformation:{width:190,height:Math.round(190*logo.height/logo.width)}})]}),
+      new Paragraph({alignment:AlignmentType.CENTER, spacing:{after:40}, children:[new TextRun({text:"Evaluación del estado de conservación de activos",bold:true,size:30,color:TINTA,font:FONT})]}),
+      new Paragraph({alignment:AlignmentType.CENTER, spacing:{after:240}, children:[new TextRun({text:"MASTER EASEMENT",size:18,color:OLIVA,bold:true,characterSpacing:40,font:FONT})]}),
+      cab,
+      new Paragraph({spacing:{before:200,after:100}, children:[new TextRun({text:`${d.activos.length} activo${d.activos.length===1?"":"s"} registrado${d.activos.length===1?"":"s"} · ${unidades} unidad${unidades===1?"":"es"}${d.estado==="completo"?"":" · Registro en curso"}`,size:18,color:GRIS,font:FONT})]}),
+      resumen,
+      new Paragraph({spacing:{after:280}, children:[]})
+    ];
+    d.activos.forEach(a=>{ hijos.push(ficha(a)); hijos.push(new Paragraph({spacing:{after:280}, children:[]})); });
+
+    const doc=new Document({creator:"Levantamiento de activos · Master Easement", title:`Reporte ${l.nombre}`,
+      styles:{default:{document:{run:{font:FONT,size:19}}}, paragraphStyles:[{id:"PieME",name:"Pie ME",run:{font:FONT,size:15,color:GRIS}}]},
+      sections:[{properties:{page:{size:{width:12240,height:15840}, margin:{top:1000,bottom:1000,left:1134,right:1134,footer:500}}},
+        footers:{default:new Footer({children:[new Paragraph({style:"PieME", alignment:AlignmentType.CENTER, children:[
+          new TextRun({text:`Master Easement · ${l.nombre} · Página `,size:15,color:GRIS,font:FONT}),
+          new TextRun({children:[PageNumber.CURRENT]}),
+          new TextRun({text:" de ",size:15,color:GRIS,font:FONT}),
+          new TextRun({children:[PageNumber.TOTAL_PAGES]})]})]})},
+        children:hijos}]});
+    const out=await Packer.toBlob(doc);
+    const blob=new Blob([out],{type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
+    const f=new Date((d.fecha||hoy())+"T12:00:00");
+    const nombreArchivo=`ME_${l.nombre.normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^\w]+/g,"_").replace(/^_|_$/g,"")}_${f.getDate()}.${MES3[f.getMonth()]}.${f.getFullYear()}.docx`;
+    await entregarArchivo(blob, nombreArchivo, `Reporte ${l.nombre}`);
+  }catch(e){ console.error(e); toast("No se pudo generar el Word. Intenta de nuevo."); }
   finally{ btn.disabled=false; btn.innerHTML=txt; }
 }
 
