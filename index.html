@@ -125,6 +125,19 @@ textarea{min-height:76px;resize:vertical}
 .acard .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .acard .acts{display:flex;gap:14px}
 .acard .acts button{border:0;background:none;color:var(--olive-dark);font-weight:600;font-size:14px;padding:4px 0}
+.listbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.listbar .small{min-width:0}
+.alist.ordering .acard{user-select:none;-webkit-user-select:none;transition:box-shadow .12s}
+.alist.ordering .acard .th{width:52px;height:52px}
+.alist.ordering .acts button:disabled{opacity:.35;cursor:default}
+.drag{flex:none;width:40px;margin:-10px 0 -10px -10px;border:0;border-right:1px solid var(--line);background:var(--surface);color:var(--olive-dark);font-size:22px;line-height:1;touch-action:none;cursor:grab;border-radius:var(--r) 0 0 var(--r)}
+.acard.dragging{position:relative;z-index:4;border-color:var(--olive);box-shadow:0 10px 28px rgba(47,47,14,.22);background:var(--bg)}
+.acard.dragging .drag{cursor:grabbing}
+.acard.drop-before{box-shadow:0 -4px 0 0 var(--olive-dark)}
+.acard.drop-after{box-shadow:0 4px 0 0 var(--olive-dark)}
+.xphotos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.xphotos .ph,.xphotos .addph{aspect-ratio:1/1}
+.xphotos .addph{font-size:13px}
 .empty{text-align:center;padding:36px 12px;color:var(--muted);border:1.5px dashed var(--line);border-radius:var(--r);display:flex;flex-direction:column;gap:6px}
 .empty b{color:var(--ink);font-size:17px}
 .locked{display:flex;gap:10px;align-items:center;background:var(--olive-soft);border-radius:var(--r);padding:12px 14px;font-weight:600;color:var(--olive-dark);margin-bottom:12px}
@@ -331,10 +344,19 @@ function migrar(st){
   for(const d of Object.values(st.lugares)) for(const a of (d.activos||[])){
     if(ESTADO_ANTERIOR[a.estado]) a.estado = ESTADO_ANTERIOR[a.estado];
     if(!a.visual) a.visual = VIS_DEF;
+    // Llave interna fija: las fotos ya guardadas siguen con su número original como llave
+    if(!a.uid) a.uid = a.id;
+    if(a.extras==null) a.extras = 0;
   }
+  // Los números visibles siguen el orden de la lista (001, 002, …), sin huecos
+  for(const lg of st.listaLugares){ const d=st.lugares[lg.id]; if(d) numerar(d, lg.cod); }
   return st;
 }
 function usarEstado(st){ S = migrar(st); LUGARES = S.listaLugares; }
+function numerar(d, cod){ (d.activos||[]).forEach((a,i)=>{ a.id=`ME-${cod}-${String(i+1).padStart(3,"0")}`; }); d.seq=(d.activos||[]).length; }
+const renumerar = lugarId => { const l=lugarCfg(lugarId); if(l) numerar(L(lugarId), l.cod); };
+const nuevaLlave = () => "u"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const MAX_EXTRA = 4;   // fotos adicionales opcionales (llaves 3 a 6)
 // Iniciales del nombre para el ID: "Playa Langosta" → PL, "Rodera" → RO
 function codigoLugar(nombre){
   const base = nombre.normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().replace(/[^A-Z0-9 ]/g," ");
@@ -598,6 +620,7 @@ function vInicio(app, footIn, foot){
 /* ===================== Vista: lugar con su lista de activos ===================== */
 function vLugar(app, footIn, foot){
   const l=lugarCfg(V.id), d=L(V.id), cerrado=d.estado==="completo";
+  const ord = !cerrado && UI.ordenar && d.activos.length>1;
   $("#topTitle").textContent=l.nombre;
   const unidades=d.activos.reduce((m,a)=>m+(+a.cantidad||0),0);
   app.innerHTML = `
@@ -608,15 +631,18 @@ function vLugar(app, footIn, foot){
   </div>
   ${cerrado?`<div class="locked">✓ Registro completo</div>`:""}
   ${d.activos.length?`<button class="btn sec small" id="wordLugar" type="button" style="margin-bottom:14px">Descargar reporte en Word</button>`:""}
-  ${d.activos.length ? `<ul class="alist">${d.activos.slice().reverse().map(a=>`
-    <li class="acard">
-      <div class="th" data-th="${esc(a.id)}">${a.foto1?"":"Sin foto"}</div>
+  ${!cerrado && d.activos.length>1 ? `<div class="listbar"><span class="small muted">${ord?"Arrastra ⠿ o usa las flechas. Los números se actualizan solos.":"Del primero al último registrado"}</span>${ord?"":`<button class="link" id="ordenar" type="button">Ordenar</button>`}</div>`:""}
+  ${d.activos.length ? `<ul class="alist ${ord?"ordering":""}" id="alist">${d.activos.map((a,i)=>`
+    <li class="acard" data-uid="${esc(a.uid)}">
+      ${ord?`<button class="drag" type="button" aria-label="Arrastrar ${esc(a.id)}">⠿</button>`:""}
+      <div class="th" data-th="${esc(a.uid)}">${a.foto1?"":"Sin foto"}</div>
       <div class="body">
         <span class="id tnum">${esc(a.id)}${a.codigo&&a.codigo!==SC?` · Placa ${esc(a.codigo)}`:""}</span>
         <span class="desc">${esc(a.descripcion)}</span>
+        ${ord?`<div class="acts"><button type="button" data-up="${esc(a.uid)}" ${i===0?"disabled":""} aria-label="Subir">↑ Subir</button><button type="button" data-down="${esc(a.uid)}" ${i===d.activos.length-1?"disabled":""} aria-label="Bajar">↓ Bajar</button></div>`:`
         <span class="sub">${esc(a.subcategoria)} · ${esc(a.ubicacion)}</span>
-        <div class="row"><span class="pill ${clsEstado(a.estado)}">${esc(a.estado)}</span>${a.visual==="Revisar"?`<span class="pill urg">⚠ Revisar</span>`:""}<span class="small muted tnum">Cant. ${esc(a.cantidad)}</span></div>
-        ${cerrado?"":`<div class="acts"><button type="button" data-ed="${esc(a.id)}">Editar</button><button type="button" data-dup="${esc(a.id)}">Duplicar</button></div>`}
+        <div class="row"><span class="pill ${clsEstado(a.estado)}">${esc(a.estado)}</span>${a.visual==="Revisar"?`<span class="pill urg">⚠ Revisar</span>`:""}<span class="small muted tnum">Cant. ${esc(a.cantidad)}</span>${a.extras?`<span class="small muted tnum">· ${(a.foto1?1:0)+(a.foto2?1:0)+a.extras} fotos</span>`:""}</div>
+        ${cerrado?"":`<div class="acts"><button type="button" data-ed="${esc(a.uid)}">Editar</button><button type="button" data-dup="${esc(a.uid)}">Duplicar</button></div>`}`}
       </div>
     </li>`).join("")}</ul>`
   : `<div class="empty"><b>Aún no hay activos</b><span>Toca “Agregar activo” para registrar el primero. Cada mesa, luminaria o rótulo con placa va por separado.</span></div>`}
@@ -629,13 +655,24 @@ function vLugar(app, footIn, foot){
   const blNo=$("#blNo"); if(blNo) blNo.onclick=()=>{ UI.borrarLugar=false; rerender(); };
   const blSi=$("#blSi"); if(blSi) blSi.onclick=async()=>{ const i=LUGARES.findIndex(x=>x.id===V.id); if(i>=0) LUGARES.splice(i,1); delete S.lugares[V.id]; await guardar(); toast(`${l.nombre} eliminado`); ir({name:"lugares"}); };
   // miniaturas
-  d.activos.forEach(async a => { if(!a.foto1) return; const t=await miniatura(a.id,1); const el=app.querySelector(`[data-th="${CSS.escape(a.id)}"]`); if(el&&t) el.innerHTML=`<img src="${t}" alt="">`; });
+  d.activos.forEach(async a => { if(!a.foto1) return; const t=await miniatura(a.uid,1); const el=app.querySelector(`[data-th="${CSS.escape(a.uid)}"]`); if(el&&t) el.innerHTML=`<img src="${t}" alt="">`; });
+  const ob=$("#ordenar"); if(ob) ob.onclick=()=>{ UI.ordenar=true; rerender(); };
+  const mover=async(uid,paso)=>{ const i=d.activos.findIndex(a=>a.uid===uid), j=i+paso; if(i<0||j<0||j>=d.activos.length) return;
+    [d.activos[i],d.activos[j]]=[d.activos[j],d.activos[i]]; renumerar(V.id); await guardar(); rerender(); };
+  app.querySelectorAll("[data-up]").forEach(b=>b.onclick=()=>mover(b.dataset.up,-1));
+  app.querySelectorAll("[data-down]").forEach(b=>b.onclick=()=>mover(b.dataset.down,1));
+  if(ord) activarArrastre($("#alist"), d, V.id);
   app.querySelectorAll("[data-ed]").forEach(b=>b.onclick=()=>abrirActivo(V.id, b.dataset.ed, false));
   app.querySelectorAll("[data-dup]").forEach(b=>b.onclick=()=>abrirActivo(V.id, b.dataset.dup, true));
   const wl=$("#wordLugar"); if(wl) wl.onclick=e=>exportarWord(V.id, e.currentTarget);
   const re=$("#reabrir"); if(re) re.onclick=async()=>{ d.estado="en_curso"; d.fechaFin=""; await guardar(); toast("Registro reabierto"); render(); };
   if(cerrado) return;
   foot.hidden=false;
+  if(ord){
+    footIn.innerHTML=`<button class="btn" id="ordListo" type="button">Listo</button>`;
+    $("#ordListo").onclick=()=>{ UI.ordenar=false; rerender(); };
+    return;
+  }
   if(UI.completar){
     footIn.innerHTML=`<div class="confirm">
       <b>¿Completar ${esc(l.nombre)} con ${d.activos.length} activo${d.activos.length===1?"":"s"}?</b>
@@ -654,6 +691,38 @@ function vLugar(app, footIn, foot){
   }
 }
 
+/* Arrastrar para ordenar: la tarjeta sigue el dedo y una línea marca dónde va a caer */
+function activarArrastre(ul, d, lugarId){
+  if(!ul) return;
+  ul.querySelectorAll(".drag").forEach(h => h.addEventListener("pointerdown", e => {
+    if(e.button!==undefined && e.button!==0) return;
+    e.preventDefault();
+    const li=h.closest("li"), otros=[...ul.children].filter(x=>x!==li);
+    const y0=e.clientY, s0=window.scrollY; let y=e.clientY, destino=otros.findIndex(x=>x===li.nextElementSibling); if(destino<0) destino=otros.length;
+    li.classList.add("dragging");
+    const pie=document.getElementById("foot"), alto=()=>pie&&!pie.hidden?pie.offsetHeight:0;
+    const marcar=()=>{
+      otros.forEach(x=>x.classList.remove("drop-before","drop-after"));
+      destino=otros.filter(x=>{ const r=x.getBoundingClientRect(); return r.top+r.height/2 < y; }).length;
+      if(destino<otros.length) otros[destino].classList.add("drop-before"); else if(otros.length) otros[otros.length-1].classList.add("drop-after");
+      li.style.transform=`translateY(${y-y0+window.scrollY-s0}px)`;
+    };
+    let raf=0;
+    const paso=()=>{ const m=90; if(y<m) window.scrollBy(0,-10); else if(y>innerHeight-m-alto()) window.scrollBy(0,10); marcar(); raf=requestAnimationFrame(paso); };
+    raf=requestAnimationFrame(paso);
+    const mueve=ev=>{ y=ev.clientY; ev.preventDefault(); };
+    const fin=async()=>{
+      cancelAnimationFrame(raf); window.removeEventListener("pointermove",mueve); window.removeEventListener("pointerup",fin); window.removeEventListener("pointercancel",fin);
+      li.classList.remove("dragging"); li.style.transform=""; otros.forEach(x=>x.classList.remove("drop-before","drop-after"));
+      const orden=otros.map(x=>x.dataset.uid); orden.splice(destino,0,li.dataset.uid);
+      const antes=d.activos.map(a=>a.uid).join("|");
+      if(orden.join("|")!==antes){ const por={}; d.activos.forEach(a=>por[a.uid]=a); d.activos=orden.map(u=>por[u]); renumerar(lugarId); await guardar(); }
+      rerender();
+    };
+    window.addEventListener("pointermove",mueve,{passive:false}); window.addEventListener("pointerup",fin); window.addEventListener("pointercancel",fin);
+  }));
+}
+
 /* ===================== Formulario de activo ===================== */
 // Cada grupo guarda: sel (opción elegida, "__otro" o PD) y otro (texto libre)
 function grupoDesde(valor, opciones){
@@ -669,10 +738,10 @@ function multiDesde(arr){
   return {sel, otro:otros.join(", ")};
 }
 async function abrirActivo(lugarId, activoId, duplicar){
-  const d=L(lugarId); const base = activoId ? d.activos.find(a=>a.id===activoId) : (d.activos[d.activos.length-1] || null);
+  const d=L(lugarId); const base = activoId ? d.activos.find(a=>a.uid===activoId) : (d.activos[d.activos.length-1] || null);
   const nuevo = !activoId || duplicar;
   F = {
-    lugar:lugarId, editId: nuevo?null:activoId,
+    lugar:lugarId, editId: nuevo?null:activoId, editLabel: nuevo?"":(base?base.id:""), extras:[],
     ubicacion: base?base.ubicacion:"",
     categoria: grupoDesde(base&&base.categoria, Object.keys(CATEGORIAS)),
     subcategoria: {sel:null, otro:""},
@@ -697,8 +766,9 @@ async function abrirActivo(lugarId, activoId, duplicar){
     });
     if(!duplicar){
       F.sinCodigo = base.codigo===SC; F.codigo = base.codigo===SC?"":base.codigo;
-      if(base.foto1) F.foto1 = await DB.get(`f:${base.id}:1`) || null;
-      if(base.foto2) F.foto2 = await DB.get(`f:${base.id}:2`) || null;
+      if(base.foto1) F.foto1 = await DB.get(`f:${base.uid}:1`) || null;
+      if(base.foto2) F.foto2 = await DB.get(`f:${base.uid}:2`) || null;
+      for(let n=3;n<3+(base.extras||0);n++){ const f=await DB.get(`f:${base.uid}:${n}`); if(f) F.extras.push(f); }
     } else {
       F.sinCodigo = base.codigo===SC;
     }
@@ -734,7 +804,7 @@ function slotFoto(n, titulo, sub, requerida){
 }
 function vActivo(app, footIn, foot){
   const l=lugarCfg(F.lugar), d=L(F.lugar);
-  $("#topTitle").textContent = F.editId ? `Editar ${F.editId}` : (V.dup ? "Duplicar activo" : `Nuevo activo · ${l.nombre}`);
+  $("#topTitle").textContent = F.editId ? `Editar ${F.editLabel}` : (V.dup ? "Duplicar activo" : `Nuevo activo · ${l.nombre}`);
   const subs=subOpciones();
   const est=valorGrupo(F.estado);
   const detReq=pideDetalle(est);
@@ -783,10 +853,15 @@ function vActivo(app, footIn, foot){
       ${slotFoto(1,"Vista general","Bien completo y su entorno",true)}
       ${slotFoto(2,"Detalle", detReq?"Placa o daño (requerida por el estado)":"Placa o daño específico", detReq)}
     </div>
+    <div class="f" id="c-extras"><span class="lbl">Fotos adicionales <span class="hint">(opcional, hasta ${MAX_EXTRA})</span></span>
+      <div class="xphotos">
+        ${F.extras.map((f,i)=>`<div class="ph"><img src="${f.thumb}" alt="Foto adicional ${i+1}"><button type="button" data-qx="${i}" aria-label="Quitar foto adicional ${i+1}">×</button></div>`).join("")}
+        ${F.extras.length<MAX_EXTRA?`<label class="addph"><b>+</b>Agregar<input type="file" accept="image/*" multiple data-extra></label>`:""}
+      </div></div>
     <label class="f"><span class="lbl">Observaciones <span class="hint">(opcional)</span></span>
       <span class="hint">Notas para el responsable del área</span>
       <textarea id="fObs" rows="2">${esc(F.obs)}</textarea></label>
-    ${F.editId?(F.confirmBorrar?`<div class="confirm red"><b>¿Eliminar ${esc(F.editId)}?</b><span class="small">Se borra el activo y sus fotos.</span>
+    ${F.editId?(F.confirmBorrar?`<div class="confirm red"><b>¿Eliminar ${esc(F.editLabel)}?</b><span class="small">Los números de los siguientes se corren para no dejar huecos.</span><span class="small">Se borra el activo y sus fotos.</span>
       <div class="row2"><button class="btn sec small" id="delNo" type="button">Cancelar</button><button class="btn danger small" id="delSi" type="button">Eliminar</button></div></div>`
       :`<button class="btn ghost" id="delAct" type="button" style="color:var(--urg)">Eliminar este activo</button>`):""}
   </section>`;
@@ -816,10 +891,18 @@ function vActivo(app, footIn, foot){
     catch(e){ toast("No se pudo leer la foto. Intenta de nuevo."); }
   });
   app.querySelectorAll("[data-qf]").forEach(b => b.onclick = () => { F["foto"+b.dataset.qf]=null; rerender(); });
+  const xin=app.querySelector("[data-extra]"); if(xin) xin.onchange = async () => {
+    const files=[...xin.files].slice(0, MAX_EXTRA-F.extras.length); if(!files.length) return;
+    for(const file of files){ try{ F.extras.push(await procesarFoto(file)); }catch(e){ toast("No se pudo leer una foto. Intenta de nuevo."); } }
+    if(xin.files.length>files.length) toast(`Se agregaron ${files.length}. El máximo es ${MAX_EXTRA} fotos adicionales`);
+    rerender();
+  };
+  app.querySelectorAll("[data-qx]").forEach(b => b.onclick = () => { F.extras.splice(+b.dataset.qx,1); rerender(); });
   const da=$("#delAct"); if(da) da.onclick=()=>{F.confirmBorrar=true; rerender();};
   const dn=$("#delNo"); if(dn) dn.onclick=()=>{F.confirmBorrar=false; rerender();};
-  const ds=$("#delSi"); if(ds) ds.onclick=async()=>{ const id=F.editId; d.activos=d.activos.filter(a=>a.id!==id);
-    await DB.del(`f:${id}:1`); await DB.del(`f:${id}:2`); delete TH[`f:${id}:1`]; delete TH[`f:${id}:2`]; await guardar(); toast(`${id} eliminado`); ir({name:"lugar", id:F.lugar}); };
+  const ds=$("#delSi"); if(ds) ds.onclick=async()=>{ const uid=F.editId, etiqueta=F.editLabel; d.activos=d.activos.filter(a=>a.uid!==uid);
+    for(let n=1;n<=2+MAX_EXTRA;n++){ await DB.del(`f:${uid}:${n}`); delete TH[`f:${uid}:${n}`]; }
+    renumerar(F.lugar); await guardar(); toast(`${etiqueta} eliminado. Números actualizados`); ir({name:"lugar", id:F.lugar}); };
   $("#guardar").onclick=()=>guardarActivo(false);
   const go=$("#guardarOtro"); if(go) go.onclick=()=>guardarActivo(true);
 }
@@ -867,21 +950,22 @@ async function guardarActivo(otroIgual){
   const claves=Object.keys(F.errores);
   if(claves.length){ rerender(); const el=document.getElementById("c-"+claves[0]); if(el) el.scrollIntoView({behavior:"smooth",block:"center"}); toast(`Faltan ${claves.length} campo${claves.length===1?"":"s"} por completar`); return; }
   const d=L(F.lugar), l=lugarCfg(F.lugar);
-  let id=F.editId;
-  if(!id){ d.seq=(d.seq||0)+1; id=`ME-${l.cod}-${String(d.seq).padStart(3,"0")}`; }
+  const uid=F.editId || nuevaLlave();
   const a = {
-    id, ubicacion:F.ubicacion.trim(),
+    uid, id:"", ubicacion:F.ubicacion.trim(),
     categoria:valorGrupo(F.categoria), subcategoria:valorGrupo(F.subcategoria),
     codigo:F.sinCodigo?SC:F.codigo.trim(), descripcion:F.descripcion.trim(),
     cantidad:F.sinCodigo?parseInt(F.cantidad):1,
     estado:valorGrupo(F.estado), visual:F.visual||VIS_DEF, factores:valorMulti(F.factores), accion:valorGrupo(F.accion),
-    obs:F.obs.trim(), foto1:!!F.foto1, foto2:!!F.foto2, registrado:new Date().toISOString()
+    obs:F.obs.trim(), foto1:!!F.foto1, foto2:!!F.foto2, extras:F.extras.length, registrado:new Date().toISOString()
   };
-  for(const n of [1,2]){ const k=`f:${id}:${n}`; if(F["foto"+n]){ await DB.set(k,F["foto"+n]); TH[k]=F["foto"+n].thumb; } else { await DB.del(k); TH[k]=null; } }
-  const i=d.activos.findIndex(x=>x.id===id);
+  for(const n of [1,2]){ const k=`f:${uid}:${n}`; if(F["foto"+n]){ await DB.set(k,F["foto"+n]); TH[k]=F["foto"+n].thumb; } else { await DB.del(k); TH[k]=null; } }
+  for(let n=3;n<3+MAX_EXTRA;n++){ const k=`f:${uid}:${n}`, f=F.extras[n-3]; if(f) await DB.set(k,f); else await DB.del(k); }
+  const i=d.activos.findIndex(x=>x.uid===uid);
   if(i>=0) d.activos[i]=a; else d.activos.push(a);
+  renumerar(F.lugar); const id=a.id;
   await guardar();
-  if(otroIgual){ toast(`${id} guardado. Registra el siguiente`); await abrirActivo(F.lugar, id, true); }
+  if(otroIgual){ toast(`${id} guardado. Registra el siguiente`); await abrirActivo(F.lugar, uid, true); }
   else { toast(`${id} guardado`); ir({name:"lugar", id:F.lugar}); }
 }
 
@@ -923,7 +1007,7 @@ async function exportarExcel(parcial, btn){
         let conFoto=false;
         for(const n of [1,2]){
           if(!a["foto"+n]) continue;
-          const f=await DB.get(`f:${a.id}:${n}`); if(!f) continue;
+          const f=await DB.get(`f:${a.uid}:${n}`); if(!f) continue;
           const img=wb.addImage({base64:f.thumb, extension:"jpeg"});
           ws.addImage(img,{tl:{col:12+n+0.08,row:r-1+0.08},ext:{width:96,height:72},editAs:"oneCell"});
           conFoto=true;
@@ -997,7 +1081,7 @@ async function exportarWord(lugarId, btn){
   try{
     const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,ShadingType,AlignmentType,ImageRun,BorderStyle,VerticalAlign,Footer,PageNumber,HeightRule,TableLayoutType}=docx;
     const FONT="Arial", TINTA="2F2F0E", OLIVA="6F6F33", SUAVE="EEEEDD", GRIS="6B6B52";
-    const W=9972, C=[1800,3186,1800,3186];           // carta, márgenes de 2 cm
+    const W=9972, C=[2000,2986,2000,2986];           // carta, márgenes de 2 cm
     const L1=C[0]+C[1], L3=C[1]+C[2]+C[3];
     const linea={style:BorderStyle.SINGLE,size:4,color:"C9C9B4"};
     const bordes={top:linea,bottom:linea,left:linea,right:linea};
@@ -1012,12 +1096,15 @@ async function exportarWord(lugarId, btn){
 
     // Fotos (caja de 3.2 x 2.15 pulgadas a 96 ppp)
     const fotos={};
-    for(const a of d.activos) for(const n of [1,2]){
-      if(!a["foto"+n]) continue; const f=await DB.get(`f:${a.id}:${n}`); if(!f) continue;
-      fotos[`${a.id}:${n}`]=await fotoWord(f.full, 300, 206);
+    for(const a of d.activos){
+      for(const n of [1,2]){
+        if(!a["foto"+n]) continue; const f=await DB.get(`f:${a.uid}:${n}`); if(!f) continue;
+        fotos[`${a.uid}:${n}`]=await fotoWord(f.full, 300, 188);
+      }
+      for(let n=3;n<3+(a.extras||0);n++){ const f=await DB.get(`f:${a.uid}:${n}`); if(f) fotos[`${a.uid}:${n}`]=await fotoWord(f.full, 145, 110); }
     }
     const celdaFoto=(a,n,titulo)=>{
-      const f=fotos[`${a.id}:${n}`];
+      const f=fotos[`${a.uid}:${n}`];
       const img=f ? new Paragraph({keepNext:true, alignment:AlignmentType.CENTER, spacing:{before:60,after:20},
           children:[new ImageRun({type:"jpg", data:f.data, transformation:{width:f.w,height:f.h}})]})
         : p("Sin foto",{italic:true,color:"9A9A80",align:AlignmentType.CENTER,before:300,after:300});
@@ -1027,6 +1114,10 @@ async function exportarWord(lugarId, btn){
     const ficha=a=>{
       const cls=clsEstado(a.estado), [bg,fg]=COLOR_ESTADO[cls]||COLOR_ESTADO.na;
       const fila=(cells,o={})=>new TableRow({children:cells, cantSplit:true, height:o.h?{value:o.h,rule:HeightRule.ATLEAST}:undefined});
+      const ex=[]; for(let n=3;n<3+(a.extras||0);n++){ const f=fotos[`${a.uid}:${n}`]; if(f) ex.push(f); }
+      const filaExtras = ex.length ? fila([celda([p("Fotos adicionales",{bold:true,size:17,color:"4A4A22"}),
+        new Paragraph({keepNext:true, alignment:AlignmentType.CENTER, spacing:{before:60,after:20},
+          children:ex.flatMap((f,i)=>[...(i?[new TextRun({text:"   "})]:[]), new ImageRun({type:"jpg", data:f.data, transformation:{width:f.w,height:f.h}})])})], W, {span:4, top:true})]) : null;
       return new Table({width:{size:W,type:WidthType.DXA}, columnWidths:C, layout:TableLayoutType.FIXED, rows:[
         fila([celda([p("ID activo",{bold:true,size:17,color:"FFFFFF"})],C[0],{fill:OLIVA}), celda([p(a.id,{bold:true,color:"FFFFFF",size:20})],C[1],{fill:OLIVA}),
               celda([p("Cantidad",{bold:true,size:17,color:"FFFFFF"})],C[2],{fill:OLIVA}), celda([p(a.cantidad,{bold:true,color:"FFFFFF"})],C[3],{fill:OLIVA})]),
@@ -1037,8 +1128,9 @@ async function exportarWord(lugarId, btn){
         fila([etq("Descripción",C[0]), val(a.descripcion,L3,{span:3})]),
         fila([etq("Factores de deterioro",C[0]), val((a.factores||[]).join(", "),C[1]), etq("Acción sugerida",C[2]), val(a.accion,C[3])]),
         fila([celdaFoto(a,1,"Foto general"), celdaFoto(a,2,"Foto detalle")]),
+        filaExtras,
         fila([etq("Observaciones",C[0],false), val(a.obs,L3,{span:3,keep:false})])
-      ]});
+      ].filter(Boolean)});
     };
 
     // Encabezado del reporte
@@ -1094,9 +1186,9 @@ async function exportarFotos(btn){
   const txt=btn.innerHTML; btn.disabled=true; btn.innerHTML="<span><b>Preparando fotos…</b></span>";
   try{
     const zip=new JSZip(); let n=0;
-    for(const l of LUGARES) for(const a of L(l.id).activos) for(const k of [1,2]){
-      if(!a["foto"+k]) continue; const f=await DB.get(`f:${a.id}:${k}`); if(!f) continue;
-      zip.folder(l.nombre.replace(/[\\/:*?"<>|]/g,"-")).file(`${a.id}_${k===1?"general":"detalle"}.jpg`, f.full.split(",")[1], {base64:true}); n++;
+    for(const l of LUGARES) for(const a of L(l.id).activos) for(let k=1;k<=2+(a.extras||0);k++){
+      if(k<=2 && !a["foto"+k]) continue; const f=await DB.get(`f:${a.uid}:${k}`); if(!f) continue;
+      zip.folder(l.nombre.replace(/[\\/:*?"<>|]/g,"-")).file(`${a.id}_${k===1?"general":k===2?"detalle":"adicional_"+(k-2)}.jpg`, f.full.split(",")[1], {base64:true}); n++;
     }
     if(!n){ toast("Todavía no hay fotos"); return; }
     const blob=await zip.generateAsync({type:"blob"});
