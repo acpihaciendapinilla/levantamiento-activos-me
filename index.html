@@ -1029,9 +1029,8 @@ async function exportarExcel(parcial, btn){
     const usados=new Set();
     const nombreHoja = n => { let b=String(n).replace(/[\\\/\*\?\:\[\]]/g,"-").trim().slice(0,31)||"Lugar", x=b, k=2;
       while(usados.has(x.toLowerCase())){ const suf=` (${k++})`; x=b.slice(0,31-suf.length)+suf; } usados.add(x.toLowerCase()); return x; };
-    const grupos = parcial
-      ? LUGARES.filter(l=>L(l.id).activos.length).map(l=>({hoja:nombreHoja(l.nombre), lugares:[l]}))
-      : [{hoja:nombreHoja("Activos"), lugares:LUGARES}];
+    // Avance y Excel madre: una hoja por lugar
+    const grupos = LUGARES.filter(l=>L(l.id).activos.length).map(l=>({hoja:nombreHoja(l.nombre), lugares:[l]}));
     for(const g of grupos) await hojaActivos(g.hoja, g.lugares);
     if(catEnHoja){ const wl=wb.addWorksheet("Listas",{state:"hidden"}); listaCat.forEach((c,i)=>{ wl.getCell(i+1,1).value=c; }); }
     async function hojaActivos(nombre, lugaresHoja){
