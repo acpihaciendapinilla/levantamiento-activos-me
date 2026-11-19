@@ -254,7 +254,8 @@ let LUGARES = [];
 const LUGARES_ANTERIORES = {langosta:["Playa Langosta","PL"], rodera:["Rodera","RD"], bonita:["Playa Bonita","PB"], avellanas:["Playa Avellanas","PA"]};
 
 /* ===================== Catálogo (del formulario de Microsoft Forms) ===================== */
-const CATEGORIAS = {
+/* Lista de respaldo: se usa si no se puede leer la hoja de Google "Catálogo de activos ME" */
+const CATEGORIAS_BASE = {
   "Mobiliario interior": ["Silletería y bancas","Mesas, barras y escritorios","Tapicería y sofás","Muebles de almacenamiento (estantes, armarios)"],
   "Mobiliario exterior": ["Madera tratada","Aluminio / metal","Ratán sintético / fibras","Sombrillas, toldos y lonas","Plástico / polipropileno"],
   "Infraestructura / obra civil": ["Decks y pasarelas","Pérgolas y gazebos","Cercas, barandas y portones","Pisos","Aceras","Adoquines","Muros","Muros de contención","Paredes","Puentes","Techos","Aleros y cubiertas"],
@@ -264,6 +265,42 @@ const CATEGORIAS = {
   "Amenidades": ["Baños de playa","Duchas de playa","Lavapiés","Extintores"],
   "Paisajismo y áreas verdes": ["Sistema de riego","Coberturas vivas y césped","Árboles","Jardineras y vegetación arbustiva","Obras de contención para áreas verdes","Drenaje superficial","Canales verdes"]
 };
+let CATEGORIAS = CATEGORIAS_BASE;
+// Hoja de Google con las categorías (carpeta "Levantamiento de activos ME" de la cuenta de la empresa).
+// Columna A: Categoría · Columna B: Subcategoría · una fila por subcategoría.
+const CATALOGO_URL = "https://docs.google.com/spreadsheets/d/1LwYsih6ifG4wR62wSR5joXYR71ZRDrN3zTyiB_Lmr9c/gviz/tq?tqx=out:csv&headers=1";
+function leerCSV(t){
+  const filas=[]; let fila=[], celda="", com=false;
+  for(let i=0;i<t.length;i++){ const ch=t[i];
+    if(com){ if(ch==='"'){ if(t[i+1]==='"'){ celda+='"'; i++; } else com=false; } else celda+=ch; }
+    else if(ch==='"') com=true;
+    else if(ch===','){ fila.push(celda); celda=""; }
+    else if(ch==='\n'||ch==='\r'){ if(ch==='\r'&&t[i+1]==='\n') i++; fila.push(celda); filas.push(fila); fila=[]; celda=""; }
+    else celda+=ch;
+  }
+  if(celda!==""||fila.length){ fila.push(celda); filas.push(fila); }
+  return filas;
+}
+function catalogoDesdeCSV(t){
+  const limpio=v=>String(v||"").replace(/\s+/g," ").trim(), cat={};
+  for(const f of leerCSV(t)){
+    const c=limpio(f[0]), sub=limpio(f[1]);
+    if(!c || /^categor[ií]a$/i.test(c)) continue;          // encabezado o fila vacía
+    if(!cat[c]) cat[c]=[];
+    if(sub && !cat[c].includes(sub)) cat[c].push(sub);      // ignora repetidas
+  }
+  return Object.keys(cat).length ? cat : null;
+}
+// Lee la hoja; si no hay señal o la hoja no sirve, se queda con la última lista guardada o con la de respaldo
+async function actualizarCatalogo(){
+  try{
+    const ctl=new AbortController(), t=setTimeout(()=>ctl.abort(),8000);
+    const r=await fetch(CATALOGO_URL+"&_="+Date.now(),{signal:ctl.signal,cache:"no-store"}); clearTimeout(t);
+    if(!r.ok) return;
+    const cats=catalogoDesdeCSV(await r.text()); if(!cats) return;
+    CATEGORIAS=cats; await DB.set("catalogo",{cats, fecha:new Date().toISOString()});
+  }catch(e){}
+}
 const ESTADOS = [
   {v:"Bueno",             cls:"ok",  d:"Operativo, desgaste leve propio del ambiente"},
   {v:"Requiere atención", cls:"bad", d:"Necesita mantenimiento, reparación o tiene algún riesgo"},
@@ -986,7 +1023,19 @@ async function exportarExcel(parcial, btn){
   const txt=btn.innerHTML; btn.disabled=true; btn.innerHTML="Generando Excel…";
   try{
     const wb=new ExcelJS.Workbook(); wb.creator="Levantamiento de activos · Master Easement";
-    const ws=wb.addWorksheet("Activos",{views:[{state:"frozen",xSplit:1,ySplit:1}]});
+    // Lista de categorías para la lista desplegable: si es larga o tiene comas va en una hoja oculta "Listas"
+    const listaCat=Object.keys(CATEGORIAS).concat(PD);
+    const catEnHoja = listaCat.some(c=>c.includes(",")) || ('"'+listaCat.join(",")+'"').length>250;
+    const usados=new Set();
+    const nombreHoja = n => { let b=String(n).replace(/[\\\/\*\?\:\[\]]/g,"-").trim().slice(0,31)||"Lugar", x=b, k=2;
+      while(usados.has(x.toLowerCase())){ const suf=` (${k++})`; x=b.slice(0,31-suf.length)+suf; } usados.add(x.toLowerCase()); return x; };
+    const grupos = parcial
+      ? LUGARES.filter(l=>L(l.id).activos.length).map(l=>({hoja:nombreHoja(l.nombre), lugares:[l]}))
+      : [{hoja:nombreHoja("Activos"), lugares:LUGARES}];
+    for(const g of grupos) await hojaActivos(g.hoja, g.lugares);
+    if(catEnHoja){ const wl=wb.addWorksheet("Listas",{state:"hidden"}); listaCat.forEach((c,i)=>{ wl.getCell(i+1,1).value=c; }); }
+    async function hojaActivos(nombre, lugaresHoja){
+    const ws=wb.addWorksheet(nombre,{views:[{state:"frozen",xSplit:1,ySplit:1}]});
     ws.columns = COLS.map(c=>({header:c.h, width:c.w}));
     const head=ws.getRow(1); head.height=32;
     head.eachCell((c,i)=>{ const seg=COLS[i-1].seg;
@@ -996,7 +1045,7 @@ async function exportarExcel(parcial, btn){
       c.border={bottom:{style:"thin",color:{argb:"FF2F2F0E"}}};
     });
     let r=2;
-    for(const l of LUGARES){
+    for(const l of lugaresHoja){
       const d=L(l.id);
       for(const a of d.activos){
         const row=ws.getRow(r);
@@ -1020,7 +1069,7 @@ async function exportarExcel(parcial, btn){
     // Listas desplegables para que el encargado agregue activos a mano con los mismos valores
     const lista = arr => ['"'+arr.join(",")+'"'];
     const listas = {
-      4: lista(Object.keys(CATEGORIAS).concat(PD)),
+      4: catEnHoja ? [`Listas!$A$1:$A$${listaCat.length}`] : lista(listaCat),
       9: lista(ESTADOS.map(e=>e.v).concat(PD)),
       10: lista(VISUAL.map(e=>`${e.ic} ${e.v}`)),
       12: lista(ACCIONES.concat(PD)),
@@ -1048,6 +1097,7 @@ async function exportarExcel(parcial, btn){
       {type:"containsText",operator:"containsText",text:"En proceso",priority:8,style:fill("FFFBEFD9","FFA46A12")}
     ]});
     ws.autoFilter={from:"A1",to:`${colLetra(COLS.length)}1`};
+    }
     const buf=await wb.xlsx.writeBuffer();
     const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     await entregarArchivo(blob, `Activos_MasterEasement_${parcial?"AVANCE_":""}${hoy()}.xlsx`, "Activos Master Easement");
@@ -1210,10 +1260,12 @@ async function exportarRespaldo(btn){
 /* ===================== Arranque ===================== */
 (async () => {
   $("#topLogo").src=LOGO;
+  try{ const g=await DB.get("catalogo"); if(g && g.cats && Object.keys(g.cats).length) CATEGORIAS=g.cats; }catch(e){}
   let st=null; try{ st = await DB.get("estado"); }catch(e){ st=null; }
   usarEstado(st && st.lugares ? st : estadoInicial());
   LUGARES.forEach(l=>L(l.id));
   render();
+  actualizarCatalogo();
 })();
 </script>
 </body></html>
